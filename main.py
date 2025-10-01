@@ -1,5 +1,5 @@
 # main.py
-import os # Import para ler variáveis de ambiente
+import os
 from fastapi import FastAPI, Depends
 from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
@@ -7,23 +7,15 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel, ConfigDict
 from typing import List
 from datetime import datetime
-from fastapi.middleware.cors import CORSMiddleware # Import do CORS
+from fastapi.middleware.cors import CORSMiddleware
 
-# --- 1. CONFIGURAÇÃO DO BANCO DE DADOS (Agora com variável de ambiente) ---
-# Pega a URL do banco da variável de ambiente 'DATABASE_URL'
+# --- CONFIGURAÇÃO DO BANCO DE DADOS ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- 2. MODELOS DA TABELA E DA API (continuam os mesmos) ---
-class LocationDB(Base):
-    __tablename__ = "locations"
-    id = Column(Integer, primary_key=True, index=True)
-    latitude = Column(Float, nullable=False)
-    longitude = Column(Float, nullable=False)
-
+# --- MODELOS DA TABELA (SQLAlchemy) ---
 class AlertDB(Base):
     __tablename__ = "alerts"
     id = Column(Integer, primary_key=True, index=True)
@@ -34,34 +26,24 @@ class AlertDB(Base):
     longitude = Column(Float)
     timestamp = Column(DateTime, server_default='now()')
 
-class Location(BaseModel):
+# --- MODELOS DE DADOS DA API (Pydantic) ---
+# Modelo para criar um novo alerta (o que recebemos do formulário)
+class AlertCreate(BaseModel):
+    title: str
+    description: str
+    category: str
     latitude: float
     longitude: float
+
+# Modelo para retornar um alerta (o que enviamos para o Flutter)
+class Alert(AlertCreate):
+    id: int
+    timestamp: datetime
     model_config = ConfigDict(from_attributes=True)
 
-class Alert(BaseModel):
-    title: str
-    description: str | None = None
-    category: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    timestamp: datetime | None = None
-    model_config = ConfigDict(from_attributes=True)
-
-# --- 3. INICIALIZAÇÃO DA API ---
+# --- INICIALIZAÇÃO DA API ---
 app = FastAPI()
-
-# --- 4. CONFIGURAÇÃO DO CORS ---
-# Permite que qualquer origem (incluindo Zapp.run) acesse sua API
-origins = ["*"] # Em produção real, você listaria os domínios permitidos
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def get_db():
     db = SessionLocal()
@@ -70,15 +52,21 @@ def get_db():
     finally:
         db.close()
 
-# --- 5. ENDPOINTS (continuam os mesmos) ---
+# --- ENDPOINTS ---
 @app.get("/")
 def read_root():
-    return {"message": "Bem-vindo à API! Acesse /locations ou /alerts"}
-
-@app.get("/locations", response_model=List[Location])
-def read_locations(db: Session = Depends(get_db)):
-    return db.query(LocationDB).all()
+    return {"message": "API de Alertas está no ar!"}
 
 @app.get("/alerts", response_model=List[Alert])
 def read_alerts(db: Session = Depends(get_db)):
     return db.query(AlertDB).order_by(AlertDB.timestamp.desc()).all()
+
+# --- NOVO ENDPOINT PARA CRIAR ALERTAS ---
+@app.post("/alerts", response_model=Alert)
+def create_alert(alert: AlertCreate, db: Session = Depends(get_db)):
+    # Converte o dado recebido (Pydantic) para o modelo do banco (SQLAlchemy)
+    db_alert = AlertDB(**alert.model_dump())
+    db.add(db_alert)
+    db.commit()
+    db.refresh(db_alert)
+    return db_alert
