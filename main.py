@@ -44,6 +44,7 @@ class AlertDB(Base):
     category = Column(String(100), index=True)  # Índice para filtros
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    bairro = Column(String(100), index=True)  # Índice para filtros por bairro
     timestamp = Column(DateTime, server_default='now()', nullable=False)
     
     # Índice composto para consultas geoespaciais
@@ -59,6 +60,7 @@ class AlertCreate(BaseModel):
     category: str = Field(..., max_length=100, description="Categoria do alerta")
     latitude: float = Field(..., ge=-90, le=90, description="Latitude (-90 a 90)")
     longitude: float = Field(..., ge=-180, le=180, description="Longitude (-180 a 180)")
+    bairro: Optional[str] = Field(None, max_length=100, description="Bairro do alerta")
 
 class Alert(AlertCreate):
     id: int
