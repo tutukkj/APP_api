@@ -45,7 +45,6 @@ class AlertDB(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     timestamp = Column(DateTime, server_default='now()', nullable=False)
-    bairro = Column(String(100))
     
     # Índice composto para consultas geoespaciais
     __table_args__ = (
@@ -60,7 +59,6 @@ class AlertCreate(BaseModel):
     category: str = Field(..., max_length=100, description="Categoria do alerta")
     latitude: float = Field(..., ge=-90, le=90, description="Latitude (-90 a 90)")
     longitude: float = Field(..., ge=-180, le=180, description="Longitude (-180 a 180)")
-    bairro: str
 
 class Alert(AlertCreate):
     id: int
@@ -154,6 +152,7 @@ def read_alerts(
     skip: int = 0,
     limit: int = 100,
     category: Optional[str] = None,
+    bairro: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -162,6 +161,7 @@ def read_alerts(
     - **skip**: Número de registros para pular (padrão: 0)
     - **limit**: Número máximo de registros (padrão: 100, máx: 1000)
     - **category**: Filtrar por categoria (opcional)
+    - **bairro**: Filtrar por bairro (opcional)
     """
     try:
         # Limita o máximo de registros
@@ -172,6 +172,10 @@ def read_alerts(
         # Filtro por categoria
         if category:
             query = query.filter(AlertDB.category == category)
+        
+        # Filtro por bairro
+        if bairro:
+            query = query.filter(AlertDB.bairro == bairro)
         
         alerts = query.offset(skip).limit(limit).all()
         return alerts
@@ -253,25 +257,54 @@ def delete_alert(alert_id: int, db: Session = Depends(get_db)):
             detail="Erro ao deletar alerta"
         )
 
-@app.get("/alerts/nearby", response_model=List[Alert], tags=["Alerts"])
+@app.get("/nearby", response_model=List[Alert], tags=["Alerts"])
 def get_nearby_alerts(
-    latitude: float = Field(..., ge=-90, le=90),
-    longitude: float = Field(..., ge=-180, le=180),
-    radius_km: float = Field(5.0, gt=0, le=100),
+    latitude: float,
+    longitude: float,
+    radius_km: float = 5.0,
     db: Session = Depends(get_db)
 ):
     """
     Busca alertas próximos a uma localização
     
     Usa aproximação simples (não é perfeita para grandes distâncias)
+    
+    - **latitude**: Latitude do ponto central (-90 a 90)
+    - **longitude**: Longitude do ponto central (-180 a 180)
     - **radius_km**: Raio de busca em km (padrão: 5km, máximo: 100km)
     """
+    # Validações
+    if not -90 <= latitude <= 90:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Latitude deve estar entre -90 e 90"
+        )
+    
+    if not -180 <= longitude <= 180:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Longitude deve estar entre -180 e 180"
+        )
+    
+    if not 0 < radius_km <= 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Raio deve estar entre 0 e 100 km"
+        )
+    
     # Aproximação: 1 grau ≈ 111 km
     degree_radius = radius_km / 111.0
     
-    alerts = db.query(AlertDB).filter(
-        AlertDB.latitude.between(latitude - degree_radius, latitude + degree_radius),
-        AlertDB.longitude.between(longitude - degree_radius, longitude + degree_radius)
-    ).order_by(AlertDB.timestamp.desc()).limit(100).all()
-    
-    return alerts
+    try:
+        alerts = db.query(AlertDB).filter(
+            AlertDB.latitude.between(latitude - degree_radius, latitude + degree_radius),
+            AlertDB.longitude.between(longitude - degree_radius, longitude + degree_radius)
+        ).order_by(AlertDB.timestamp.desc()).limit(100).all()
+        
+        return alerts
+    except SQLAlchemyError as e:
+        logger.error(f"Erro ao buscar alertas próximos: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao buscar alertas próximos"
+        )
