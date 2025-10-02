@@ -27,7 +27,6 @@ class AlertDB(Base):
     timestamp = Column(DateTime, server_default='now()')
 
 # --- MODELOS DE DADOS DA API (Pydantic) ---
-# Modelo para criar um novo alerta (o que recebemos do formulário)
 class AlertCreate(BaseModel):
     title: str
     description: str
@@ -70,3 +69,4 @@ def create_alert(alert: AlertCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_alert)
     return db_alert
+
